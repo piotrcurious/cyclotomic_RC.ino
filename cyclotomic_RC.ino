@@ -33,6 +33,11 @@ float frequency = 0;
 // Define a variable to store the RC circuit resonance point
 float resonance = 0;
 
+// Function prototypes to avoid compilation issues in C++
+void updateLFSR();
+void readRC();
+void findResonance();
+
 // Define a function to update the LFSR state and output pin
 void updateLFSR() {
   // Compute the feedback bit by XOR-ing the tap bits
@@ -51,12 +56,16 @@ void readRC() {
   voltage = analogRead(INPUT_PIN) * (5.0 / 1023.0);
   
   // Compute the resistance of the RC circuit using Ohm's law and Kirchhoff's voltage law
-  // Assume that the output pin voltage is either 0V or 5V depending on the LFSR state
-  resistance = (5.0 - voltage) / (voltage / CAPACITOR_VALUE);
+  // V_capacitor = V_input * (1 - e^(-t/RC))
+  float t = 0.01; // 10ms delay in loop
+  if (voltage < 4.9 && voltage > 0.1) {
+    resistance = -t / (CAPACITOR_VALUE * log(1.0 - (voltage / 5.0)));
+  } else {
+    resistance = 1e6; // Default to high resistance
+  }
   
   // Compute the frequency of the RC circuit using cyclotomic polynomial analysis
   // Assume that the LFSR state is periodic with a period of (2^LFSR_BITS - 1) clock cycles
-  // The formula for cyclotomic polynomial analysis is derived from https://en.wikipedia.org/wiki/Cyclotomic_polynomial#Cyclotomic_fields_and_Gauss_sums
   frequency = (pow(2, LFSR_BITS) - 1) / (CAPACITOR_VALUE * resistance * log(2));
 }
 
@@ -67,12 +76,15 @@ void findResonance() {
   
   // Define a static variable to store the previous difference between frequency and prevFrequency
   static float prevDiff = 0;
+
+  // State to track if we've already triggered on this peak
+  static bool peakTriggered = false;
   
   // Compute the current difference between frequency and prevFrequency
   float diff = frequency - prevFrequency;
   
   // Check if the sign of diff has changed from positive to negative, indicating a local maximum
-  if (diff < 0 && prevDiff > 0) {
+  if (diff < 0 && prevDiff > 0 && !peakTriggered) {
     // Update the resonance point with the average of frequency and prevFrequency
     resonance = (frequency + prevFrequency) / 2;
     
@@ -81,10 +93,9 @@ void findResonance() {
     Serial.print(resonance);
     Serial.println(" Hz");
     
-    // Reset prevDiff to avoid finding multiple resonance points in a row
-    prevDiff = diff;
-    
-    return; // Exit the function early
+    peakTriggered = true; // Mark as triggered to avoid repeats on same peak
+  } else if (diff > 0) {
+    peakTriggered = false; // Reset for next peak when frequency starts rising again
   }
   
   // Update prevFrequency and prevDiff with the current values
